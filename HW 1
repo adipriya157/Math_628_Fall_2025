@@ -1,0 +1,75 @@
+import numpy as np
+import pandas as pd
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, roc_auc_score
+import matplotlib.pyplot as plt
+
+###
+Importing google data
+###
+
+data_dict = pd.read_pickle('/content/ticker_data_dict.pkl') 
+df = data_dict['GOOG'].copy()  
+df = df.sort_index()
+px = df['Close']
+
+###
+feature choosing
+###
+
+ret1 = px.pct_change()               
+ret5 = px.pct_change(5)
+vol20 = ret1.rolling(20).std()
+mom10 = px.pct_change(10)
+sma10 = px.rolling(10).mean()
+sma20 = px.rolling(20).mean()
+sma_ratio = (sma10/sma20)-1
+
+X = pd.concat({
+    'ret1': ret1.shift(1),
+    'ret5': ret5.shift(1),
+    'vol20': vol20.shift(1),
+    'mom10': mom10.shift(1),
+    'sma_ratio': sma_ratio.shift(1),
+}, axis=1)
+
+###
+We use a simple labelling technique that deals with whether the stock will go up or down (in order to adopt a long or short position).
+###
+
+# Labels: +1 if next-day return > 0 else -1
+fwd = np.sign(ret1.shift(-1))
+fwd = fwd.replace(0, -1)  # if exactly 0 return, treat as -1
+y = fwd
+
+
+###
+We deal with missing data and run the prediction.
+###
+
+data = pd.concat([X, y.rename('label'), ret1.rename('ret')], axis=1).dropna()
+X = data[X.columns]
+y = data['label']
+ret = data['ret']
+
+###
+80-20 training test split.
+###
+
+split = int(len(X)*0.80)
+X_train, X_test = X.iloc[:split], X.iloc[split:]
+y_train, y_test = y.iloc[:split], y.iloc[split:]
+ret_test = ret.iloc[split:]
+
+
+pipe = Pipeline([
+    ('scaler', StandardScaler()),
+    ('clf', LogisticRegression(max_iter=10_000))
+])
+pipe.fit(X_train, y_train)
+
+probabibility = pipe.predict_proba(X_test)[:,1]
+prediction = np.where(proba>=0.5, 1, -1)
+
